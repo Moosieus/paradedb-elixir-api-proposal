@@ -93,7 +93,7 @@ defmodule Scanner.Call do
 end
 ```
 
-The index name could also be omitted, defaulting to `#{schema_name}_search_idx`.
+The index name could also be omitted, defaulting to `"#{schema_name}_search_idx"`.
 
 ## The FROM Expression
 ParadeDB's query syntax essentially embeds (*perhaps hijacks*) in the FROM expression of a SQL query. Here's some not necessarily practical examples for sake of illustration:
