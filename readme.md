@@ -185,12 +185,13 @@ search_idx.search(query => paradedb.boolean(must => ARRAY[...]))
 
 The maximal query also illustrates the need for search operators to have bindings, in order to disambiguate their targets.
 
-## Top-level search options:
-pg_search provides the following as options for the top-level search:
+## Optional parameters:
+The top-level `paradedb.search()` call accepts the following as options:
 * `limit_rows` - The maximum number of rows to return.
 * `offset_rows` - The number of rows to skip before starting to return rows.
 * `stable_sort` - A boolean specifying whether ParadeDB should stabilize the order of equally-scored results, at the cost of performance.
 
+The could be handled like so:
 ```elixir
 from(
   c in Call,
@@ -205,10 +206,19 @@ from(
 )
 ```
 
+Options for all other calls could be passed as keyword lists. `paradedb.fuzzy_term` serves a good example as it accepts 3 optional arguments, `distance`, `transpose_cost_one`, and `prefix`.
+```elixir
+from(
+  c in Call,
+  search: parse(c, "transcript:walking"),
+  search: fuzzy_term(c.transcript, "walk", distance: 0, prefix: true),
+  order_by: {:desc, c.call_length}
+)
+```
+
 ## Misc. Notes
 * ParadeQL strings are expressly **aren't** wrapped, leaving them as a sort of escape hatch. They would instead be passed as parameters.
 * Parameterization appears like it'd be relatively straightforward.
-* Optional parameters could be provided as a keyword list (maybe).
 * It's somewhat verbose prepending everything with `search:`, but it helps draw a clean line between normal ecto expressions and ParadeDB specific ones.
 
 ## Open Questions
