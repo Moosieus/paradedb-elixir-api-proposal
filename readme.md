@@ -57,7 +57,7 @@ end
 ```
 
 ## The Schema
-There's some important things to establish in the ecto schema itself:
+There's some important things to establish in the Ecto schema itself:
 - The schema has a search index that can be queried.
 - Queries on that index return that schema (and thus can be mapped and preloaded accordingly).
 - What fields are available in the search index.
@@ -81,7 +81,7 @@ defmodule Scanner.Call do
     belongs_to :talk_group, TalkGroup
 
     # new
-    pdb_index "calls_search_idx", [
+    search_index "calls_search_idx", [
       :transcript,
       :system_id,
       :call_length,
@@ -96,12 +96,12 @@ end
 The index name could also be omitted, defaulting to `"#{schema_name}_search_idx"`.
 
 ## The FROM Expression
-ParadeDB's query syntax essentially embeds (*perhaps hijacks*) in the FROM expression of a SQL query. Here's some not necessarily practical examples for sake of illustration:
+ParadeDB's query syntax essentially embeds in (*perhaps hijacks*) the FROM expression of a SQL query. Below are some not strictly practical examples to illustrate. First, a simple SQL query with basic filtering:
 
 ```sql
 SELECT * FROM calls WHERE transcript ilike '%walking%' AND call_length > 3;
 ```
-A simple workalike to the above using ParadeQL would be:
+A simple workalike to the above using the search engine via ParadeQL would be:
 ```sql
 SELECT * FROM calls_search_idx.search('transcript:walking') WHERE call_length > 3;
 
@@ -109,7 +109,7 @@ SELECT * FROM calls_search_idx.search('transcript:walking') WHERE call_length > 
 SELECT * FROM calls_search_idx.search(query => paradedb.parse('transcript:walking')) WHERE call_length > 3;
 ```
 
-pg_search's "Advanced" queries nest within:
+We could also move the conditions entirely into the search engine itself using "Advanced" queries:
 ```sql
 SELECT * FROM calls_search_idx.search(query => paradedb.boolean(
   must => ARRAY[
@@ -117,10 +117,12 @@ SELECT * FROM calls_search_idx.search(query => paradedb.boolean(
     paradedb.range(field => 'call_length', range => '[3,)'::int4range)
   ]
 )) AS i JOIN talk_groups AS ii ON ii.id = i.talk_group_id;
+-- and JOIN the result :D
 ```
 
-For the sake of it, a more maximal example:
+Here's a **maximal example** to serve as a limit test:
 ```sql
+-- help wanted: make this query even more complex.
 SELECT * FROM calls_search_idx.search(query => paradedb.boolean(
   must => ARRAY[
     paradedb.parse('transcript:walking'),
@@ -131,10 +133,9 @@ SELECT * FROM calls_search_idx.search(query => paradedb.boolean(
 JOIN talk_groups_search_idx.search(query => paradedb.parse('alpha_tag:MCPD')) AS ii ON ii.id = i.talk_group_id
 ORDER BY i.call_length DESC;
 ```
-*Help wanted: make this query even more complex.*
 
-### Expressing this in Ecto
-First, the plain query:
+### Expressing the above in Ecto
+First, the basic query:
 ```elixir
 from(
   c in Calls,
@@ -143,11 +144,11 @@ from(
 )
 ```
 
-The next one could be expressed as so, if we know we want a text search ahead of time:
+The next "advanced" query could be expressed as so:
 ```elixir
 pdb_from(
   c in Calls,
-  search: pdb_parse(c, "transcript:walking"),
+  search: parse(c, "transcript:walking"),
   where: c.call_length > 3
 )
 ```
@@ -163,8 +164,10 @@ query =
     query
   end
 ```
+The above demonstrates the need for `search/3` to modify the queries' internal `%FromExpr{}`.
 
-Finally, the maximal example:
+
+Finally, the **maximal example**:
 ```elixir
 from(
   c in Call,
@@ -177,21 +180,21 @@ from(
   order_by: {:desc, c.call_length}
 )
 ```
-The above assumes `search:` would work like Ecto's `where:` macro, defaulting to a logical "AND" for each expression. This would have to resolve to `paradedb.boolean` at the top level like so:
+The above assumes `search/3` would behave like Ecto's `where/3`, defaulting to a logical "AND" for each expression. This would have to resolve to `paradedb.boolean` at the top level like so:
 
 ```sql
 search_idx.search(query => paradedb.boolean(must => ARRAY[...]))
 ```
 
-The maximal query also illustrates the need for search operators to have bindings, in order to disambiguate their targets.
+The **maximal example** also illustrates the need for search operators to have bindings, in order to disambiguate their targets.
 
 ## Optional parameters:
 The top-level `paradedb.search()` call accepts the following as options:
 * `limit_rows` - The maximum number of rows to return.
 * `offset_rows` - The number of rows to skip before starting to return rows.
-* `stable_sort` - A boolean specifying whether ParadeDB should stabilize the order of equally-scored results, at the cost of performance.
+* `stable_sort` - A boolean specifying whether ParadeDB should stabilize the order of equally-scored results.
 
-The could be handled like so:
+These could be handled in their own expressions:
 ```elixir
 from(
   c in Call,
@@ -206,7 +209,7 @@ from(
 )
 ```
 
-Options for all other calls could be passed as keyword lists. `paradedb.fuzzy_term` serves a good example as it accepts 3 optional arguments, `distance`, `transpose_cost_one`, and `prefix`.
+Options for all other calls could be passed as keyword lists. `paradedb.fuzzy_term` serves a good example as it accepts 3 optional arguments, `distance`, `transpose_cost_one`, and `prefix`:
 ```elixir
 from(
   c in Call,
@@ -216,13 +219,58 @@ from(
 )
 ```
 
+## Booleans
+Boolean operators can feasibly follow Ecto's established conventions:
+```elixir
+from(
+  c in Call,
+  search: parse(c, "transcript:walking") or fuzzy_term(c.transcript, "walk"),
+  order_by: {:desc, c.call_length}
+)
+```
+would translate to:
+```sql
+SELECT * FROM calls_search_idx.search(query => paradedb.boolean(
+  should => ARRAY[
+    paradedb.parse('transcript:walking'),
+    paradedb.fuzzy_term(field => 'transcript', value => 'walk'),
+  ]
+)) AS i
+ORDER BY i.call_length DESC; 
+```
+
+The top-level boolean logic represents somewhat of an edge-case. Ecto addresses this by providing `or_where/3` in addition to `where/3`. The same solution might be applied by providing `or_search/3` in addition to `search/3`:
+```elixir
+from(
+  c in Call,
+  search: parse(c, "transcript:walking"),
+  search: fuzzy_term(c.transcript, "walk"),
+  or_search: parse(c, "transcript:running")
+  order_by: {:desc, c.call_length}
+)
+```
+This would effectively "`OR`" every clause prior:
+```sql
+SELECT * FROM calls_search_idx.search(query => paradedb.boolean(
+  should => ARRAY[
+    paradedb.boolean(
+      must => ARRAY[
+        paradedb.parse('transcript:walking'),
+        paradedb.fuzzy_term(field => 'transcript', value => 'walk')
+      ]
+    ),
+    paradedb.parse('transcript:running')
+  ]
+)) AS i
+ORDER BY i.call_length DESC; 
+```
+
 ## Misc. Notes
-* ParadeQL strings are expressly **aren't** wrapped, leaving them as a sort of escape hatch. They would instead be passed as parameters.
-* Parameterization appears like it'd be relatively straightforward.
-* It's somewhat verbose prepending everything with `search:`, but it helps draw a clean line between normal ecto expressions and ParadeDB specific ones.
+* ParadeQL strings are expressly **aren't** wrapped, leaving them as a manner of escape hatch. They would be parameterized.
+* Parameterization is straightforward due to pg_search's using existing Postgres syntax and data types.
+* Expressing everything within `search/3` draws clean demarkation between Ecto's expressions and pg_search's, at the expense of some verbosity.
 
 ## Open Questions
-* Figure out what the boolean operators should look like.
-* Figure out what facets should look like.
+* What should facets look like?
 * Determine if a `search_fragment` macro in order?
-* Figure out what where an ideal implementation would need to start.
+* Where would an ideal implementation start?
