@@ -245,7 +245,7 @@ from(
   c in Call,
   search: parse(c, "transcript:walking"),
   search: fuzzy_term(c.transcript, "walk"),
-  or_search: parse(c, "transcript:running")
+  or_search: parse(c, "transcript:running"),
   order_by: {:desc, c.call_length}
 )
 ```
@@ -272,5 +272,5 @@ ORDER BY i.call_length DESC;
 
 ## Open Questions
 * What should facets look like?
-* Determine if a `search_fragment` macro in order?
+* Would a `search_fragment` macro in order?
 * Where would an ideal implementation start?
