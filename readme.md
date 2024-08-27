@@ -140,7 +140,7 @@ First, the basic query:
 from(
   c in Calls,
   where: ilike(c.transcript, "%walking%"),
-  where: c.call_length > 3,
+  where: c.call_length > 3
 )
 ```
 
