@@ -1,4 +1,4 @@
-# API proposal for ParadeDB extension for Ecto
+# ParadeDB Ecto extension API Proposal
 My aim here's to figure out what an API for ParadeDB in Ecto should look like, and determine what it'd take to implement.
 
 #### What `0.1` should cover:
